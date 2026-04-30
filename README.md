@@ -1,4 +1,4 @@
-# 🏠 Smart Home Sensor-Based Appliance Control (IoT Project)
+# 🏠 Enhanced Smart Home Automation System with Advanced Monitoring and Control (IoT Project)
 
 A **Smart Home Automation System** built using **Arduino** and sensors to monitor environmental conditions and control home appliances through a **web-based dashboard**.
 
