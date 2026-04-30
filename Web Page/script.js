@@ -1,121 +1,162 @@
 let port;
-let reader;
 let writer;
+let devices = [];
+let autoMode = false;
+let onTime = 0;
+let energy = 0;
 
-let ledState = 0;
-let energyStart = 0;
-let totalOnTime = 0;
-
-// ---------- LOGIN ----------
+// -------- LOGIN --------
 function login() {
-  const name = loginName.value;
-  const email = loginEmail.value;
+  const name = document.getElementById("loginName").value.trim();
+  const email = document.getElementById("loginEmail").value.trim();
+  if (!name || !email) { alert("Please enter name and email"); return; }
 
-  welcomeText.innerText = "Welcome " + name;
-  setName.innerText = name;
-  setEmail.innerText = email;
-
-  loginOverlay.classList.add("hidden");
-  app.classList.remove("hidden");
+  document.getElementById("loginOverlay").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+  document.getElementById("welcomeText").innerText = "Welcome " + name;
+  document.getElementById("setName").innerText = name;
+  document.getElementById("setEmail").innerText = email;
 }
 
-// ---------- LOGOUT ----------
-function logout() {
-  location.reload();
+function showRegister() {
+  document.getElementById("loginForm").classList.add("hidden");
+  document.getElementById("registerForm").classList.remove("hidden");
 }
 
-// ---------- PAGE SWITCH ----------
-function showPage(id) {
+function showLogin() {
+  document.getElementById("registerForm").classList.add("hidden");
+  document.getElementById("loginForm").classList.remove("hidden");
+}
+
+function register() { alert("Registration successful! Please login."); showLogin(); }
+
+// -------- PAGE NAVIGATION --------
+function showPage(pageId) {
   document.querySelectorAll(".page").forEach(p => p.classList.add("hidden"));
-  document.getElementById(id).classList.remove("hidden");
+  document.getElementById(pageId).classList.remove("hidden");
 }
 
-// ---------- CONNECT ARDUINO ----------
-async function connectArduino() {
-  try {
-    port = await navigator.serial.requestPort();
-    await port.open({ baudRate: 9600 });
-
-    writer = port.writable.getWriter();
-    reader = port.readable.getReader();
-
-    connStatus.innerText = "Connected";
-    readSerialData();
-  } catch {
-    alert("Arduino connection failed");
-  }
+// -------- DEVICES --------
+function addDevice() {
+  const name = prompt("Enter appliance name:");
+  if (!name) return;
+  devices.push({ id: Date.now(), name });
+  renderDevices();
 }
 
-// ---------- READ SERIAL ----------
-async function readSerialData() {
-  const decoder = new TextDecoder();
-  let buffer = "";
+function renderDevices() {
+  const container = document.getElementById("deviceList");
+  container.innerHTML = "";
+  if (devices.length === 0) { container.innerHTML = "<p class='empty'>No devices added</p>"; return; }
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value);
-    let lines = buffer.split("\n");
-    buffer = lines.pop();
-
-    lines.forEach(processLine);
-  }
-}
-
-// ---------- PROCESS SENSOR DATA ----------
-function processLine(line) {
-  line = line.trim();
-  let parts = line.split(",");
-
-  parts.forEach(p => {
-    if (p.startsWith("T:")) tempValue.innerText = p.split(":")[1];
-    if (p.startsWith("H:")) humValue.innerText = p.split(":")[1];
-    if (p.startsWith("L:")) lightValue.innerText = p.split(":")[1];
-    if (p.startsWith("M:")) motionValue.innerText =
-      p.split(":")[1] == "1" ? "Motion Detected" : "No Motion";
-    if (p.startsWith("S:")) {
-      let current = parseInt(p.split(":")[1]);
-      if (current === 1 && ledState === 0) energyStart = Date.now();
-      if (current === 0 && ledState === 1) {
-        totalOnTime += (Date.now() - energyStart) / 1000;
-        updateEnergy();
-      }
-      ledState = current;
-    }
+  devices.forEach(device => {
+    const card = document.createElement("div");
+    card.className = "device-card";
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3>${device.name}</h3>
+        <div>
+          <button onclick="editDevice(${device.id})">✏️</button>
+          <button onclick="removeDevice(${device.id})">🗑</button>
+        </div>
+      </div>
+      <button onclick="controlDevice('${device.name}','ON')">TURN ON</button>
+      <button onclick="controlDevice('${device.name}','OFF')">TURN OFF</button>
+      ${device.name.toLowerCase() === 'led' ? `<button onclick="controlDevice('${device.name}','AUTO')">AUTO MODE</button>` : ""}
+    `;
+    container.appendChild(card);
   });
 }
 
-// ---------- ENERGY CALCULATION ----------
-function updateEnergy() {
-  onTime.innerText = totalOnTime.toFixed(1);
-  // Assume 10W device
-  let energy = (10 * totalOnTime) / 3600;
-  energyValue.innerText = energy.toFixed(3);
+function editDevice(id) {
+  const device = devices.find(d => d.id === id);
+  const newName = prompt("Edit appliance name:", device.name);
+  if (newName) { device.name = newName; renderDevices(); }
 }
 
-// ---------- ADD DEVICE ----------
-function addDevice() {
-  const name = prompt("Enter device name");
-  if (!name) return;
+function removeDevice(id) { devices = devices.filter(d => d.id !== id); renderDevices(); }
 
-  const div = document.createElement("div");
-  div.className = "device-card";
-  div.innerHTML = `
-    <h3>${name}</h3>
-    <button onclick="turnOn()">TURN ON</button>
-    <button onclick="turnOff()">TURN OFF</button>
-  `;
-  deviceList.appendChild(div);
+// -------- DEVICE CONTROL --------
+function controlDevice(device, action) {
+  if (!port) { alert("Arduino not connected!"); return; }
+
+  // Trim spaces & convert to lowercase
+  device = device.trim().toLowerCase();
+  console.log("Device:", device, "Action:", action); // debug
+
+  if (device.includes("light")) {
+    if (action === "ON") sendToArduino("1");
+    else if (action === "OFF") sendToArduino("0");
+    else if (action === "AUTO") sendToArduino("A");
+
+  }else if (device.includes("fan")) {
+  if (action === "ON") sendToArduino("F");
+  else if (action === "OFF") sendToArduino("f");
+  else if (action === "AUTO") sendToArduino("T");
+
+} else if (device.includes("socket")) {
+  if (action === "ON") sendToArduino("S");
+  else if (action === "OFF") sendToArduino("s");
+  else if (action === "AUTO") sendToArduino("C");
+}else {
+    alert("Unknown device: " + device);
+  }
 }
 
-// ---------- APPLIANCE CONTROL ----------
-async function turnOn() {
-  if (!writer) return alert("Connect Arduino first");
-  await writer.write(new TextEncoder().encode("1"));
+
+// -------- CONNECT ARDUINO --------
+async function connectArduino() {
+  if (!("serial" in navigator)) { alert("Web Serial API not supported"); return; }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 9600 });
+    writer = port.writable.getWriter();
+    document.getElementById("connStatus").innerText = "Connected";
+    document.getElementById("connStatus").style.color = "green";
+    readSensors(); // start reading sensors
+  } catch (err) { console.error(err); alert("Connection failed!"); }
 }
 
-async function turnOff() {
-  if (!writer) return alert("Connect Arduino first");
-  await writer.write(new TextEncoder().encode("0"));
+// -------- SEND TO ARDUINO --------
+async function sendToArduino(cmd) {
+  if (port && writer) {
+    const data = new TextEncoder().encode(cmd);
+    await writer.write(data);
+    console.log("Sent:", cmd);
+  }
 }
+
+// -------- READ SENSORS --------
+async function readSensors() {
+  if (!port) return;
+  const reader = port.readable.getReader();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += new TextDecoder().decode(value);
+      let lines = buffer.split("\n");
+      buffer = lines.pop();
+      for (let line of lines) {
+        line = line.trim();
+        if (line.startsWith("T:")) {
+          const parts = line.split(",");
+          document.getElementById("tempValue").innerText = parts[0].split(":")[1];
+          document.getElementById("humValue").innerText = parts[1].split(":")[1];
+          document.getElementById("motionValue").innerText = parts[2].split(":")[1] == "1" ? "Detected" : "No";
+          document.getElementById("lightValue").innerText = parts[3].split(":")[1];
+        }
+      }
+    }
+  } catch (err) { console.error(err); }
+  finally { reader.releaseLock(); }
+}
+
+// -------- ENERGY SIMULATION --------
+setInterval(() => {
+  onTime += Math.random() * 2;
+  energy += Math.random() * 0.5;
+  document.getElementById("onTime").innerText = onTime.toFixed(1);
+  document.getElementById("energyValue").innerText = energy.toFixed(2);
+}, 3000);
